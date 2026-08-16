@@ -1,0 +1,4 @@
+# Your tasks. Manage them from the capy's right-click menu → Todos…
+# (add / edit / check off / delete — all in-app). "[ ]" = to do, "[x]" = done.
+[ ] Reply to pending emails
+[x] Review the pull request
