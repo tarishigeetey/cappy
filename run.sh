@@ -11,4 +11,9 @@ if [ ! -d ".venv" ]; then
   ./.venv/bin/pip install -r requirements.txt -q
 fi
 
-exec ./.venv/bin/python -m cappy.app
+# Start the app detached from the terminal so it keeps running even after the
+# shell exits or the terminal window is closed.
+nohup ./.venv/bin/python -m cappy.app >/dev/null 2>&1 &
+
+echo "Cappy started in the background."
+disown 2>/dev/null || true

@@ -57,6 +57,10 @@ SPOTIFY_REACT_DEFAULT = True
 # Seconds before a reminder fires that the capy shows a subtle "heads-up" wiggle.
 PREWARN_SEC = 60
 
+# Auto-hide the pet a few seconds after a reminder is completed or snoozed so it
+# can disappear until you call it back.
+AUTO_HIDE_AFTER_REMINDER_SEC = 20
+
 # Snooze length in minutes when you snooze a reminder.
 SNOOZE_MINUTES = 5
 
@@ -284,10 +288,12 @@ class Bubble(QtWidgets.QWidget):
             QtCore.Qt.WindowType.FramelessWindowHint
             | QtCore.Qt.WindowType.WindowStaysOnTopHint
             | QtCore.Qt.WindowType.Tool
-            | QtCore.Qt.WindowType.WindowTransparentForInput,
+            | QtCore.Qt.WindowType.WindowTransparentForInput
+            | QtCore.Qt.WindowType.WindowDoesNotAcceptFocus,
         )
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
         self._text = ""
         self.hide()
 
@@ -369,10 +375,12 @@ class Capy(QtWidgets.QWidget):
             None,
             QtCore.Qt.WindowType.FramelessWindowHint
             | QtCore.Qt.WindowType.WindowStaysOnTopHint
-            | QtCore.Qt.WindowType.Tool,
+            | QtCore.Qt.WindowType.Tool
+            | QtCore.Qt.WindowType.WindowDoesNotAcceptFocus,
         )
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
 
         self.sprites = self._load_sprites()
         self.mood = "idle"
@@ -388,9 +396,12 @@ class Capy(QtWidgets.QWidget):
         self.nag_bounce = 0.0
         self.ignore_ticks = 0
         self.paused = False              # reminders paused via menu bar
+        self.hidden = False
         self._held_mood = None           # sticky manual mood (persists ~30 min)
         self._celebrating = False        # true during a task-done bee celebration
         self._hold_timer = QtCore.QTimer(self)
+        self._hide_after_reminder = QtCore.QTimer(self)
+        self._hide_after_reminder.setSingleShot(True)
         self._hold_timer.setSingleShot(True)
         self._hold_timer.timeout.connect(self._release_held_mood)
         self._active_todo_line = None    # which todos.txt line is being nagged
@@ -443,6 +454,44 @@ class Capy(QtWidgets.QWidget):
         self.flavor = QtCore.QTimer(self)
         self.flavor.timeout.connect(self._random_flavor)
         self.flavor.start(20 * 1000)
+
+        self._setup_tray()
+
+    def _setup_tray(self):
+        try:
+            pix = QtGui.QPixmap(22, 22)
+            pix.fill(QtCore.Qt.GlobalColor.transparent)
+            p = QtGui.QPainter(pix)
+            p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+            p.setBrush(QtGui.QColor(240, 180, 88))
+            p.drawEllipse(3, 3, 16, 16)
+            p.setPen(QtGui.QColor(30, 30, 30))
+            p.setFont(QtGui.QFont("SF Pro Text", 11, QtGui.QFont.Weight.Bold))
+            p.drawText(pix.rect(), QtCore.Qt.AlignmentFlag.AlignCenter, "C")
+            p.end()
+            icon = QtGui.QIcon(pix)
+            self.tray = QtWidgets.QSystemTrayIcon(icon)
+            menu = QtWidgets.QMenu()
+            menu.addAction("Show Cappy", self.show_pet)
+            menu.addAction("Hide Cappy", self.hide_pet)
+            menu.addSeparator()
+            menu.addAction("Quit Cappy", QtWidgets.QApplication.quit)
+            self.tray.setContextMenu(menu)
+            self.tray.show()
+        except Exception:
+            self.tray = None
+
+    def show_pet(self):
+        self.hidden = False
+        self.show()
+        self.raise_()
+        self.move(int(self.x), int(self.y))
+        self._place_bubble()
+
+    def hide_pet(self):
+        self.hidden = True
+        self.bubble.hide()
+        self.hide()
 
     # -- sprite loading ------------------------------------------------------
     def _load_sprites(self):
@@ -540,6 +589,11 @@ class Capy(QtWidgets.QWidget):
             m.addAction("✓ Done", self.complete_reminder)
             m.addAction(f"Snooze {SNOOZE_MINUTES} min", self.snooze_reminder)
             m.addSeparator()
+        if self.hidden:
+            m.addAction("Show Cappy", self.show_pet)
+        else:
+            m.addAction("Hide Cappy", self.hide_pet)
+        m.addSeparator()
         # trigger any currently-active reminder now
         if self.custom_reminders:
             trig = m.addMenu("Remind me now")
@@ -866,7 +920,9 @@ class Capy(QtWidgets.QWidget):
         self._last_reminder = self.active_reminder
         self.state = "wander"
         self.active_reminder = None
+        self._hide_after_reminder.stop()
         self.celebrate(bubble="done! ⭐" if was_todo else "yay! ⭐")
+        QtCore.QTimer.singleShot(AUTO_HIDE_AFTER_REMINDER_SEC * 1000, self.hide_pet)
 
     def celebrate(self, bubble="done! ⭐", seconds=4.0):
         """Show the bee capy in celebration, uninterrupted, then return to normal."""
@@ -885,9 +941,11 @@ class Capy(QtWidgets.QWidget):
         name = self.active_reminder
         self.state = "wander"
         self.active_reminder = None
+        self._hide_after_reminder.stop()
         self.set_mood("idle")
         self._say_bubble(f"okay, {SNOOZE_MINUTES} min…", 1500)
         QtCore.QTimer.singleShot(1500, self._back_to_idle)
+        QtCore.QTimer.singleShot(AUTO_HIDE_AFTER_REMINDER_SEC * 1000, self.hide_pet)
         if name == "todo":
             QtCore.QTimer.singleShot(SNOOZE_MINUTES * 60 * 1000, self.fire_todo)
         elif name:

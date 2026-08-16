@@ -1,0 +1,11 @@
+{
+  "custom_reminders": {
+    "work": {
+      "minutes": 45,
+      "text": "back to work, you got this",
+      "emoji": "\ud83d\udcbc",
+      "say": "Focus time."
+    }
+  },
+  "citrus_mode": true
+}
