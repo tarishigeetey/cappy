@@ -4,8 +4,8 @@
       "minutes": 45,
       "text": "back to work, you got this",
       "emoji": "\ud83d\udcbc",
-      "say": "Focus time."
+      "say": "Reminder: back to work, you got this"
     }
   },
-  "citrus_mode": true
+  "citrus_mode": false
 }

@@ -4,6 +4,11 @@
 set -e
 cd "$(dirname "$0")"
 
+# Make sure we don't keep old copies of the app alive from earlier launches,
+# otherwise the new behavior won't appear.
+pkill -f "python -m cappy.app" 2>/dev/null || true
+pkill -f "cappy.app" 2>/dev/null || true
+
 if [ ! -d ".venv" ]; then
   echo "Setting up Cappy (one-time)…"
   python3 -m venv .venv

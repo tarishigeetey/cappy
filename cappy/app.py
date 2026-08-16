@@ -13,6 +13,8 @@ import os
 import json
 import random
 import subprocess
+import atexit
+import fcntl
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
@@ -458,17 +460,38 @@ class Capy(QtWidgets.QWidget):
         self._setup_tray()
 
     def _setup_tray(self):
+        self.tray = None
+        self._status_item = None
         try:
-            pix = QtGui.QPixmap(22, 22)
-            pix.fill(QtCore.Qt.GlobalColor.transparent)
-            p = QtGui.QPainter(pix)
-            p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-            p.setBrush(QtGui.QColor(240, 180, 88))
-            p.drawEllipse(3, 3, 16, 16)
-            p.setPen(QtGui.QColor(30, 30, 30))
-            p.setFont(QtGui.QFont("SF Pro Text", 11, QtGui.QFont.Weight.Bold))
-            p.drawText(pix.rect(), QtCore.Qt.AlignmentFlag.AlignCenter, "C")
-            p.end()
+            preferred = ["logo.png", "plain.png", "heart.png"]
+            pix = None
+            for name in preferred:
+                path = os.path.join(SPRITE_DIR, name)
+                candidate = QtGui.QPixmap(path)
+                if not candidate.isNull():
+                    pix = candidate
+                    break
+            if pix is None:
+                pix = QtGui.QPixmap(40, 40)
+                pix.fill(QtCore.Qt.GlobalColor.transparent)
+                p = QtGui.QPainter(pix)
+                p.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+                p.setBrush(QtGui.QColor(0, 0, 0))
+                p.drawRect(0, 0, 39, 39)
+                p.end()
+            else:
+                pix = pix.scaled(30, 30,
+                                 QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                                 QtCore.Qt.TransformationMode.SmoothTransformation)
+                if pix.hasAlphaChannel():
+                    alpha = pix.toImage()
+                    for y in range(alpha.height()):
+                        for x in range(alpha.width()):
+                            color = alpha.pixelColor(x, y)
+                            if color.alpha() > 0:
+                                color.setAlpha(int(color.alpha() * 0.8))
+                                alpha.setPixelColor(x, y, color)
+                    pix = QtGui.QPixmap.fromImage(alpha)
             icon = QtGui.QIcon(pix)
             self.tray = QtWidgets.QSystemTrayIcon(icon)
             menu = QtWidgets.QMenu()
@@ -478,8 +501,40 @@ class Capy(QtWidgets.QWidget):
             menu.addAction("Quit Cappy", QtWidgets.QApplication.quit)
             self.tray.setContextMenu(menu)
             self.tray.show()
+            return
         except Exception:
-            self.tray = None
+            pass
+
+        try:
+            from AppKit import NSStatusBar, NSVariableStatusItemLength, NSMenu, NSMenuItem
+            bar = NSStatusBar.systemStatusBar()
+            item = bar.statusItemWithLength_(NSVariableStatusItemLength)
+            item.setTitle_("C")
+            item.setToolTip_("Cappy")
+            menu = NSMenu.alloc().init()
+            for title, action in [
+                ("Show Cappy", "showPet:"),
+                ("Hide Cappy", "hidePet:"),
+                ("Quit Cappy", "quitCappy:"),
+            ]:
+                mitem = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, action, "")
+                mitem.setTarget_(self)
+                menu.addItem_(mitem)
+            item.setMenu_(menu)
+            self._status_item = item
+            self._status_menu = menu
+        except Exception:
+            self._status_item = None
+            self._status_menu = None
+
+    def showPet_(self, _sender=None):
+        self.show_pet()
+
+    def hidePet_(self, _sender=None):
+        self.hide_pet()
+
+    def quitCappy_(self, _sender=None):
+        QtWidgets.QApplication.quit()
 
     def show_pet(self):
         self.hidden = False
@@ -1041,6 +1096,41 @@ class Capy(QtWidgets.QWidget):
         self.bubble.move(bx, by)
 
 
+INSTANCE_LOCK_PATH = os.path.join(BASE_DIR, ".cappy.lock")
+_INSTANCE_LOCK_FD = None
+
+
+def acquire_single_instance_lock(lock_path=INSTANCE_LOCK_PATH):
+    """Return True if this is the only running Cappy instance."""
+    global _INSTANCE_LOCK_FD
+    try:
+        fd = open(lock_path, "a+")
+        try:
+            fcntl.flock(fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            fd.close()
+            return False
+        _INSTANCE_LOCK_FD = fd
+        atexit.register(release_single_instance_lock)
+        return True
+    except Exception:
+        return False
+
+
+def release_single_instance_lock():
+    global _INSTANCE_LOCK_FD
+    if _INSTANCE_LOCK_FD is not None:
+        try:
+            fcntl.flock(_INSTANCE_LOCK_FD.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            pass
+        try:
+            _INSTANCE_LOCK_FD.close()
+        except Exception:
+            pass
+        _INSTANCE_LOCK_FD = None
+
+
 def _hide_from_dock():
     """Make this a background/agent app: no Dock icon, not in Cmd-Tab.
 
@@ -1056,6 +1146,9 @@ def _hide_from_dock():
 
 
 def main():
+    if not acquire_single_instance_lock():
+        return 0
+
     app = QtWidgets.QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     _hide_from_dock()
